@@ -1,20 +1,22 @@
-
 import streamlit as st
 import pdfplumber
 import tempfile
-import openai
 import json
+from openai import OpenAI
 
 st.set_page_config(page_title="FinClaro - Analiza tu estado de cuenta", layout="centered")
 
 st.title("📄 FinClaro")
 st.subheader("Sube tu estado de cuenta en PDF y obtén un análisis claro y útil")
 
-openai.api_key = st.secrets["openai"]["api_key"]
+# Inicializar cliente OpenAI
+client = OpenAI(api_key=st.secrets["openai"]["api_key"])
 
 def prompt_estado_cuenta(texto):
     return f"""
-Eres un asistente financiero. Tu tarea es analizar el texto plano de un estado de cuenta bancario en español y devolver un JSON estructurado con la siguiente información:
+Eres un asistente financiero. Tu tarea es analizar el texto plano de un estado de cuenta bancario en español y devolver dos cosas:
+
+1. Un JSON estructurado con esta información:
 
 {{
   "banco": "nombre del banco",
@@ -49,7 +51,18 @@ Eres un asistente financiero. Tu tarea es analizar el texto plano de un estado d
   ]
 }}
 
-Analiza el siguiente texto de un estado de cuenta y responde solo con el JSON:
+2. Una lista de insights financieros para el usuario. Usa este formato:
+
+**INSIGHTS**
+
+- Tu saldo actual es mayor al anterior, lo cual indica que acumulaste más deuda.
+- Solo pagaste el mínimo, podrías generar intereses.
+- Tienes 3 cargos a meses sin intereses por un total de $X.
+- Tu gasto mensual fue de $X, principalmente en categoría Y.
+
+Solo responde con el JSON y luego los insights. No incluyas texto adicional fuera de eso.
+
+Aquí está el texto del estado de cuenta:
 
 <<<
 {texto}
@@ -65,7 +78,6 @@ if uploaded_file:
 
     st.success("Archivo cargado correctamente ✅")
 
-    # Extraer texto
     with pdfplumber.open(tmp_path) as pdf:
         all_text = ""
         for page in pdf.pages:
@@ -79,7 +91,7 @@ if uploaded_file:
         st.info("Procesando estado de cuenta con inteligencia artificial...")
 
         try:
-            response = openai.ChatCompletion.create(
+            completion = client.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": "Eres un experto en análisis financiero."},
@@ -89,8 +101,13 @@ if uploaded_file:
                 max_tokens=2000
             )
 
-            respuesta = response["choices"][0]["message"]["content"]
-            resultado_json = json.loads(respuesta)
+            respuesta = completion.choices[0].message.content
+
+            # Separar JSON e insights
+            json_part = respuesta.split("**INSIGHTS**")[0].strip()
+            insights_part = respuesta.split("**INSIGHTS**")[-1].strip()
+
+            resultado_json = json.loads(json_part)
 
             st.success("✅ Análisis completo")
             st.subheader("Resumen general")
@@ -98,6 +115,9 @@ if uploaded_file:
 
             st.subheader("Movimientos detectados")
             st.dataframe(resultado_json["movimientos"])
+
+            st.subheader("🔍 Insights financieros")
+            st.markdown(insights_part)
 
         except Exception as e:
             st.error(f"❌ Error al procesar con OpenAI: {e}")
