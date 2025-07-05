@@ -1,65 +1,20 @@
+
 import streamlit as st
 import pdfplumber
 import tempfile
-import json
 import requests
 
-st.set_page_config(page_title="FinClaro - Analiza tu estado de cuenta", layout="centered")
+st.set_page_config(page_title="FinClaro - Análisis simple", layout="centered")
 
 st.title("📄 FinClaro")
-st.subheader("Sube tu estado de cuenta en PDF y obtén un análisis claro y útil")
+st.subheader("Sube tu estado de cuenta en PDF y recibe observaciones claras")
 
-def prompt_estado_cuenta(texto):
+def generar_prompt(texto):
     return f"""
-Eres un asistente financiero. Tu tarea es analizar el texto plano de un estado de cuenta bancario en español y devolver dos cosas:
+Eres un asesor financiero. Analiza el siguiente estado de cuenta en español y proporciona observaciones útiles para el usuario. 
+Sé claro, directo, empático y útil. Resume lo más importante que ves en los movimientos, pagos, intereses, uso de crédito, meses sin intereses, etc.
 
-1. Un JSON estructurado con esta información:
-
-{{
-  "banco": "nombre del banco",
-  "periodo": {{
-    "fecha_corte": "YYYY-MM-DD",
-    "fecha_pago": "YYYY-MM-DD"
-  }},
-  "resumen": {{
-    "saldo_anterior": number,
-    "saldo_actual": number,
-    "pago_minimo": number,
-    "pago_para_no_generar_intereses": number,
-    "intereses_cobrados": number
-  }},
-  "movimientos": [
-    {{
-      "fecha": "YYYY-MM-DD",
-      "descripcion": "texto",
-      "monto": number,
-      "tipo": "cargo" o "pago"
-    }}
-  ],
-  "msi_detalle": [
-    {{
-      "fecha": "YYYY-MM-DD",
-      "descripcion": "texto",
-      "monto_original": number,
-      "meses_totales": number,
-      "meses_restantes": number,
-      "pago_mensual": number
-    }}
-  ]
-}}
-
-2. Una lista de insights financieros para el usuario. Usa este formato:
-
-**INSIGHTS**
-
-- Tu saldo actual es mayor al anterior, lo cual indica que acumulaste más deuda.
-- Solo pagaste el mínimo, podrías generar intereses.
-- Tienes 3 cargos a meses sin intereses por un total de $X.
-- Tu gasto mensual fue de $X, principalmente en categoría Y.
-
-Solo responde con el JSON y luego los insights. No incluyas texto adicional fuera de eso.
-
-Aquí está el texto del estado de cuenta:
+Texto del estado de cuenta:
 
 <<<
 {texto}
@@ -67,8 +22,8 @@ Aquí está el texto del estado de cuenta:
 """
 
 def llamar_deepseek(texto, api_key):
-    prompt = prompt_estado_cuenta(texto)
-    
+    prompt = generar_prompt(texto)
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -77,7 +32,7 @@ def llamar_deepseek(texto, api_key):
     data = {
         "model": "deepseek-chat",
         "messages": [
-            {"role": "system", "content": "Eres un experto en análisis financiero."},
+            {"role": "system", "content": "Eres un asesor financiero experto en crédito personal."},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.3
@@ -109,26 +64,11 @@ if uploaded_file:
     if not all_text.strip():
         st.error("No se pudo extraer texto del PDF. ¿Es escaneado?")
     else:
-        st.info("Procesando estado de cuenta con inteligencia artificial...")
-
-        try:
-            respuesta = llamar_deepseek(all_text, st.secrets["deepseek"]["api_key"])
-
-            # Separar JSON e insights
-            json_part = respuesta.split("**INSIGHTS**")[0].strip()
-            insights_part = respuesta.split("**INSIGHTS**")[-1].strip()
-
-            resultado_json = json.loads(json_part)
-
-            st.success("✅ Análisis completo")
-            st.subheader("Resumen general")
-            st.json(resultado_json["resumen"])
-
-            st.subheader("Movimientos detectados")
-            st.dataframe(resultado_json["movimientos"])
-
-            st.subheader("🔍 Insights financieros")
-            st.markdown(insights_part)
-
-        except Exception as e:
-            st.error(f"❌ Error al procesar con DeepSeek: {e}")
+        with st.spinner("Analizando el estado de cuenta con inteligencia artificial..."):
+            try:
+                respuesta = llamar_deepseek(all_text, st.secrets["deepseek"]["api_key"])
+                st.success("✅ Análisis completo")
+                st.subheader("🔍 Observaciones e insights")
+                st.markdown(respuesta)
+            except Exception as e:
+                st.error(f"❌ Error al procesar con DeepSeek: {e}")
