@@ -3,11 +3,15 @@ import streamlit as st
 import pdfplumber
 import tempfile
 import requests
+from PIL import Image
 
 st.set_page_config(page_title="FinClaro - Análisis simple", layout="centered")
 
-st.title("📄 FinClaro")
+logo = Image.open("logo.png")  # asegúrate que el archivo esté en la raíz del repo
+st.image(logo, width=160)
+st.title("FinClaro")
 st.subheader("Sube tu estado de cuenta en PDF y recibe observaciones claras")
+
 
 def generar_prompt(texto):
     return f"""
