@@ -1,3 +1,5 @@
 streamlit
 pdfplumber
 requests
+Pillow
+matplotlib
