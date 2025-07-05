@@ -2,15 +2,12 @@ import streamlit as st
 import pdfplumber
 import tempfile
 import json
-from openai import OpenAI
+import requests
 
 st.set_page_config(page_title="FinClaro - Analiza tu estado de cuenta", layout="centered")
 
 st.title("📄 FinClaro")
 st.subheader("Sube tu estado de cuenta en PDF y obtén un análisis claro y útil")
-
-# Inicializar cliente OpenAI
-client = OpenAI(api_key=st.secrets["openai"]["api_key"])
 
 def prompt_estado_cuenta(texto):
     return f"""
@@ -69,6 +66,30 @@ Aquí está el texto del estado de cuenta:
 >>>
 """
 
+def llamar_deepseek(texto, api_key):
+    prompt = prompt_estado_cuenta(texto)
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": "Eres un experto en análisis financiero."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.3
+    }
+
+    response = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=data)
+
+    if response.status_code == 200:
+        return response.json()["choices"][0]["message"]["content"]
+    else:
+        raise Exception(f"Error de DeepSeek: {response.status_code} - {response.text}")
+
 uploaded_file = st.file_uploader("Cargar archivo PDF", type=["pdf"])
 
 if uploaded_file:
@@ -91,17 +112,7 @@ if uploaded_file:
         st.info("Procesando estado de cuenta con inteligencia artificial...")
 
         try:
-            completion = client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "Eres un experto en análisis financiero."},
-                    {"role": "user", "content": prompt_estado_cuenta(all_text)}
-                ],
-                temperature=0.3,
-                max_tokens=2000
-            )
-
-            respuesta = completion.choices[0].message.content
+            respuesta = llamar_deepseek(all_text, st.secrets["deepseek"]["api_key"])
 
             # Separar JSON e insights
             json_part = respuesta.split("**INSIGHTS**")[0].strip()
@@ -120,4 +131,4 @@ if uploaded_file:
             st.markdown(insights_part)
 
         except Exception as e:
-            st.error(f"❌ Error al procesar con OpenAI: {e}")
+            st.error(f"❌ Error al procesar con DeepSeek: {e}")
