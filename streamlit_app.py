@@ -4,6 +4,7 @@ import tempfile
 import requests
 from PIL import Image
 import matplotlib.pyplot as plt
+import re
 
 st.set_page_config(page_title="FinClaro - Análisis simple", layout="centered")
 
@@ -29,8 +30,10 @@ Tu respuesta debe estar organizada así:
    - ✈️ Viajes
    - 🛍️ Compras personales
    - 💳 Meses sin intereses
-   Da el gasto en pesos por categoría, ejemplo: Supermercado: $1234.50
+   Da el gasto en pesos por categoría. Ejemplo: Supermercado: $1234.50
 4. **Consejos personalizados**: en tono empático y útil.
+
+Es muy importante que no dejes secciones vacías. Si no encuentras información suficiente, indícalo con un mensaje breve.
 
 Texto del estado de cuenta:
 
@@ -38,6 +41,7 @@ Texto del estado de cuenta:
 {texto}
 >>>
 """
+
 
 def llamar_deepseek(texto, api_key):
     prompt = generar_prompt(texto)
@@ -88,11 +92,14 @@ if uploaded_file:
                 respuesta = llamar_deepseek(all_text, st.secrets["deepseek"]["api_key"])
                 st.success("✅ Análisis completo")
 
-                # Mostrar secciones con subtítulos
-                st.subheader("📊 Resumen financiero")
+                # Respuesta cruda para debug
+                st.subheader("🧾 Respuesta sin procesar (debug)")
+                st.code(respuesta)
+
                 partes = respuesta.split("**")
                 for sec in partes:
                     if "Resumen general" in sec:
+                        st.subheader("📊 Resumen general")
                         st.markdown(sec.strip())
                     elif "Observaciones útiles" in sec:
                         st.subheader("🔍 Observaciones útiles")
@@ -101,9 +108,7 @@ if uploaded_file:
                         st.subheader("📂 Gasto por categoría")
                         st.markdown(sec.strip())
 
-                        # Intentar graficar
                         try:
-                            import re
                             labels = []
                             values = []
                             lines = sec.split("\n")
@@ -117,7 +122,7 @@ if uploaded_file:
                                 ax.pie(values, labels=labels, autopct='%1.1f%%', startangle=90)
                                 ax.axis("equal")
                                 st.pyplot(fig)
-                        except Exception as e:
+                        except Exception:
                             st.warning("No se pudo graficar el gasto por categoría automáticamente.")
 
                     elif "Consejos personalizados" in sec:
