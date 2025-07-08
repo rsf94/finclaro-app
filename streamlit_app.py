@@ -46,6 +46,32 @@ def extract_general_info(text):
     segment = segment_match.group(1).capitalize() if segment_match else "Unknown"
     return {"bank": bank, "card_type": card_type, "segment": segment}
 
+def extract_metadata(text):
+    general_info = extract_general_info(text)
+    periodo_match = re.search(r"Periodo:\s*(\d{2}-[A-Z]{3}-\d{4})\s*al\s*(\d{2}-[A-Z]{3}-\d{4})", text)
+    cutoff_match = re.search(r"Fecha\s+de\s+corte:\s*(\d{2}-[A-Z]{3}-\d{4})", text)
+    card_number_match = re.search(r"Número\s+de\s+Tarjeta:\s*([\d-]+)", text)
+    payment_due_date = extract_payment_due_date_flexible(text)
+    def conv_date(d):
+        months = {
+            "ENE": "JAN", "FEB": "FEB", "MAR": "MAR", "ABR": "APR",
+            "MAY": "MAY", "JUN": "JUN", "JUL": "JUL", "AGO": "AUG",
+            "SEP": "SEP", "OCT": "OCT", "NOV": "NOV", "DIC": "DEC"
+        }
+        for es, en in months.items():
+            d = d.replace(es, en)
+        return pd.to_datetime(d, format="%d-%b-%Y").strftime("%Y-%m-%d")
+    return {
+        "bank": general_info["bank"],
+        "card_type": general_info["card_type"],
+        "segment": general_info["segment"],
+        "period_start": conv_date(periodo_match.group(1)) if periodo_match else None,
+        "period_end": conv_date(periodo_match.group(2)) if periodo_match else None,
+        "cutoff_date": conv_date(cutoff_match.group(1)) if cutoff_match else None,
+        "payment_due_date": payment_due_date,
+        "card_number": card_number_match.group(1) if card_number_match else None,
+    }
+
 def parse_financial_summary_table(text):
     lines = [line.strip() for line in text.replace('\xa0', ' ').splitlines() if line.strip()]
     keys_map = {
@@ -193,7 +219,7 @@ def main():
             for page in pdf.pages:
                 text = page.extract_text()
                 if text:
-                    full_text += text + "\\n"
+                    full_text += text + "\n"
 
         if not full_text.strip():
             st.error("No se pudo extraer texto del PDF. ¿Es un PDF escaneado?")
