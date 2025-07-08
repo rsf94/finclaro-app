@@ -8,101 +8,50 @@ from PIL import Image
 
 st.set_page_config(page_title="FinClaro - Análisis simple", layout="centered")
 
-# Cargar logo (ajusta la ruta si hace falta)
+# Carga el logo, reemplaza "logo.png" por la ruta correcta si hace falta
 logo = Image.open("logo.png")
 st.image(logo, width=160)
 st.title("FinClaro")
 st.subheader("Sube tu estado de cuenta en PDF y recibe observaciones claras")
 
-def convert_date_spanish_to_iso(date_str):
-    months_es_to_en = {
-        "ENE": "JAN", "FEB": "FEB", "MAR": "MAR", "ABR": "APR",
-        "MAY": "MAY", "JUN": "JUN", "JUL": "JUL", "AGO": "AUG",
-        "SEP": "SEP", "OCT": "OCT", "NOV": "NOV", "DIC": "DEC"
-    }
-    for es, en in months_es_to_en.items():
-        date_str = date_str.upper().replace(es, en)
-    return pd.to_datetime(date_str, format="%d-%b-%Y").strftime("%Y-%m-%d")
+def parse_resumen_financiero_fijo(text):
+    start_marker = "RESUMEN DE CARGOS Y ABONOS DEL PERIODO"
+    end_marker = "COMPRAS Y CARGOS DIFERIDOS A MESES SIN INTERESES"
+    start_idx = text.find(start_marker)
+    if start_idx == -1:
+        return {}
+    end_idx = text.find(end_marker, start_idx)
+    if end_idx == -1:
+        end_idx = len(text)
+    block = text[start_idx:end_idx]
 
-def extract_payment_due_date_flexible(text):
-    lines = text.splitlines()
+    lines = [line.strip() for line in block.splitlines() if line.strip()]
+
+    campos_ordenados = [
+        "previous_balance",
+        "regular_charges",
+        "installment_purchases",
+        "interest_amount",
+        "commission_amount",
+        "tax_on_interest_commission",
+        "payments_and_credits",
+        "payment_to_avoid_interest"
+    ]
+
+    numeros = []
     for line in lines:
-        if "fecha límite de pago" in line.lower():
-            idx = lines.index(line)
-            candidates = lines[idx:idx+3]
-            for cand in candidates:
-                match = re.search(r"(\d{1,2}-[A-Z]{3}-\d{4})", cand.upper())
-                if match:
-                    return convert_date_spanish_to_iso(match.group(1))
-    return None
+        encontrados = re.findall(r"[\d,.]+\.\d{2}", line)
+        for num in encontrados:
+            numeros.append(float(num.replace(",", "")))
 
-def extract_general_info(text):
-    text_clean = text.replace('\xa0', ' ').replace('\n', ' ')
-    bank_match = re.search(r"\bBanco\b(?:\s+[A-Za-záéíóúÁÉÍÓÚñÑ]+){1,4}", text_clean, re.IGNORECASE)
-    bank = bank_match.group(0).strip() if bank_match else "Unknown"
-    card_type_match = re.search(r"\bTarjeta\b\s+(?:de\s+)?(Crédito|Débito|Debito)", text_clean, re.IGNORECASE)
-    card_type = card_type_match.group(1).capitalize() if card_type_match else "Unknown"
-    segment_match = re.search(r"Estado de Cuenta\s+([A-Za-z]+)", text_clean, re.IGNORECASE)
-    segment = segment_match.group(1).capitalize() if segment_match else "Unknown"
-    return {"bank": bank, "card_type": card_type, "segment": segment}
+    resultado = {}
+    for i, campo in enumerate(campos_ordenados):
+        if i < len(numeros):
+            resultado[campo] = numeros[i]
+        else:
+            resultado[campo] = None
 
-def extract_metadata(text):
-    general_info = extract_general_info(text)
-    periodo_match = re.search(r"Periodo:\s*(\d{2}-[A-Z]{3}-\d{4})\s*al\s*(\d{2}-[A-Z]{3}-\d{4})", text)
-    cutoff_match = re.search(r"Fecha\s+de\s+corte:\s*(\d{2}-[A-Z]{3}-\d{4})", text)
-    card_number_match = re.search(r"Número\s+de\s+Tarjeta:\s*([\d-]+)", text)
-    payment_due_date = extract_payment_due_date_flexible(text)
-    def conv_date(d):
-        months = {
-            "ENE": "JAN", "FEB": "FEB", "MAR": "MAR", "ABR": "APR",
-            "MAY": "MAY", "JUN": "JUN", "JUL": "JUL", "AGO": "AUG",
-            "SEP": "SEP", "OCT": "OCT", "NOV": "NOV", "DIC": "DEC"
-        }
-        for es, en in months.items():
-            d = d.replace(es, en)
-        return pd.to_datetime(d, format="%d-%b-%Y").strftime("%Y-%m-%d")
-    return {
-        "bank": general_info["bank"],
-        "card_type": general_info["card_type"],
-        "segment": general_info["segment"],
-        "period_start": conv_date(periodo_match.group(1)) if periodo_match else None,
-        "period_end": conv_date(periodo_match.group(2)) if periodo_match else None,
-        "cutoff_date": conv_date(cutoff_match.group(1)) if cutoff_match else None,
-        "payment_due_date": payment_due_date,
-        "card_number": card_number_match.group(1) if card_number_match else None,
-    }
-
-def parse_financial_summary_table(text):
-    lines = [line.strip() for line in text.replace('\xa0', ' ').splitlines() if line.strip()]
-    keys_map = {
-        "adeudo del periodo anterior": "previous_balance",
-        "cargos regulares": "regular_charges",
-        "cargos compras a meses": "installment_purchases",
-        "monto de intereses": "interest_amount",
-        "monto de comisiones": "commission_amount",
-        "iva de intereses y comisiones": "tax_on_interest_commission",
-        "pagos y abonos": "payments_and_credits",
-        "pago para no generar intereses": "payment_to_avoid_interest"
-    }
-    result = {}
-    i = 0
-    while i < len(lines) - 1:
-        label = lines[i].lower()
-        label_clean = re.sub(r"\(.*?\)|\d+", "", label).strip()
-        for k in keys_map:
-            if k in label_clean:
-                value_line = lines[i + 1].replace("$", "").replace(",", "").replace("+", "").replace("-", "").strip()
-                try:
-                    result[keys_map[k]] = float(value_line)
-                except:
-                    result[keys_map[k]] = None
-                i += 1
-                break
-        i += 1
-    for v in keys_map.values():
-        if v not in result:
-            result[v] = None
-    return result
+    return resultado
 
 def extract_movements(text):
     regex_charge = re.compile(
@@ -138,33 +87,6 @@ def extract_movements(text):
 
     return df_movements.to_dict(orient="records")
 
-def extract_msi_purchases(text):
-    lines = [line.strip() for line in text.splitlines()]
-    msi_records = []
-    i = 0
-    while i < len(lines) - 6:
-        try:
-            date = convert_date_spanish_to_iso(lines[i])
-            description = re.sub(r"\s+", " ", lines[i + 1])
-            original_amount = float(lines[i + 2].replace("$", "").replace(",", ""))
-            pending_balance = float(lines[i + 3].replace("$", "").replace(",", ""))
-            payment_required = float(lines[i + 4].replace("$", "").replace(",", ""))
-            payment_number = lines[i + 5]
-            interest_rate = lines[i + 6]
-            msi_records.append({
-                "date": date,
-                "description": description,
-                "original_amount": original_amount,
-                "pending_balance": pending_balance,
-                "payment_required": payment_required,
-                "payment_number": payment_number,
-                "interest_rate": interest_rate
-            })
-        except:
-            pass
-        i += 1
-    return msi_records
-
 def add_consistency_flag(financial_summary, movements, tolerance=10):
     cargos_sum = sum(m["amount"] for m in movements if m["type"] == "charge")
     pagos_sum = sum(m["amount"] for m in movements if m["type"] == "payment")
@@ -184,7 +106,8 @@ def add_consistency_flag(financial_summary, movements, tolerance=10):
 
     return financial_summary
 
-def llamar_deepseek(prompt, api_key):
+def llamar_deepseek_simple(field_name, pdf_text, api_key):
+    prompt = f"Extrae solo el valor numérico para '{field_name}' del siguiente texto:\n\n{pdf_text}"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -192,21 +115,16 @@ def llamar_deepseek(prompt, api_key):
     data = {
         "model": "deepseek-chat",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.3
+        "temperature": 0.0
     }
     response = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=data)
     if response.status_code == 200:
-        return response.json()["choices"][0]["message"]["content"]
+        return response.json()["choices"][0]["message"]["content"].strip()
     else:
         raise Exception(f"Error DeepSeek: {response.status_code} {response.text}")
 
-def fallback_deepseek_for_field(field_name, pdf_text, api_key):
-    prompt = f"Extrae el campo '{field_name}' del siguiente estado de cuenta en texto:\n\n{pdf_text}"
-    return llamar_deepseek(prompt, api_key)
-
 def main():
     st.title("FinClaro - Análisis de Estado de Cuenta Banorte")
-
     uploaded_file = st.file_uploader("Sube tu estado de cuenta en PDF", type=["pdf"])
 
     if uploaded_file:
@@ -217,57 +135,37 @@ def main():
         with pdfplumber.open(tmp_path) as pdf:
             full_text = ""
             for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    full_text += text + "\n"
+                txt = page.extract_text()
+                if txt:
+                    full_text += txt + "\n"
 
         if not full_text.strip():
             st.error("No se pudo extraer texto del PDF. ¿Es un PDF escaneado?")
             return
 
-        st.info("Procesando extracción local...")
-        metadata = extract_metadata(full_text)
-        financial_summary = parse_financial_summary_table(full_text)
+        financial_summary = parse_resumen_financiero_fijo(full_text)
         movements = extract_movements(full_text)
-        msi_purchases = extract_msi_purchases(full_text)
         financial_summary = add_consistency_flag(financial_summary, movements)
 
-        cargos_sum = sum(m["amount"] for m in movements if m["type"] == "charge")
-        pagos_sum = sum(m["amount"] for m in movements if m["type"] == "payment")
-
         campos_faltantes = [k for k, v in financial_summary.items() if v is None]
-
-        st.write("Campos faltantes en resumen:", campos_faltantes)
-        st.write(f"Suma cargos movimientos: {cargos_sum}")
-        st.write(f"Cargos resumen: {(financial_summary.get('regular_charges') or 0) + (financial_summary.get('installment_purchases') or 0)}")
-        st.write(f"Suma pagos movimientos: {pagos_sum}")
-        st.write(f"Pagos resumen: {financial_summary.get('payments_and_credits') or 0}")
-
-        if campos_faltantes or not financial_summary["summary_consistent"]:
-            st.warning("Inconsistencias detectadas. Consultando DeepSeek para completar análisis...")
+        if campos_faltantes:
+            st.warning(f"Campos faltantes: {campos_faltantes}. Consultando DeepSeek para completarlos...")
             api_key = st.secrets["deepseek"]["api_key"]
-
             for campo in campos_faltantes:
                 try:
-                    valor = fallback_deepseek_for_field(campo, full_text, api_key)
-                    st.write(f"Campo {campo} extraído con DeepSeek:")
-                    st.write(valor)
+                    valor = llamar_deepseek_simple(campo, full_text, api_key)
+                    try:
+                        financial_summary[campo] = float(valor.replace(",", ""))
+                    except:
+                        financial_summary[campo] = valor
                 except Exception as e:
-                    st.error(f"Error consultando DeepSeek para {campo}: {e}")
-        else:
-            st.success("Extracción local completa y consistente.")
+                    st.error(f"Error al consultar DeepSeek para {campo}: {e}")
 
         st.subheader("Resumen financiero")
         st.json(financial_summary)
 
         st.subheader("Movimientos (primeros 10)")
         st.table(movements[:10])
-
-        st.subheader("Compras a Meses Sin Intereses")
-        st.table(msi_purchases)
-
-        st.subheader("Metadata del Estado de Cuenta")
-        st.json(metadata)
 
 if __name__ == "__main__":
     main()
