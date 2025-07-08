@@ -14,12 +14,6 @@ st.image(logo, width=160)
 st.title("FinClaro")
 st.subheader("Sube tu estado de cuenta en PDF y recibe observaciones claras")
 
-# Aquí agrega todas las funciones de extracción que ya definimos,
-# como: convert_date_spanish_to_iso, extract_metadata, parse_financial_summary_table, etc.
-
-import re
-import pandas as pd
-
 def convert_date_spanish_to_iso(date_str):
     months_es_to_en = {
         "ENE": "JAN", "FEB": "FEB", "MAR": "MAR", "ABR": "APR",
@@ -200,73 +194,6 @@ def main():
                 text = page.extract_text()
                 if text:
                     full_text += text + "\\n"
-
-        if not full_text.strip():
-            st.error("No se pudo extraer texto del PDF. ¿Es un PDF escaneado?")
-            return
-
-        st.info("Procesando extracción local...")
-        metadata = extract_metadata(full_text)
-        financial_summary = parse_financial_summary_table(full_text)
-        movements = extract_movements(full_text)
-        msi_purchases = extract_msi_purchases(full_text)
-        financial_summary = add_consistency_flag(financial_summary, movements)
-
-        cargos_sum = sum(m["amount"] for m in movements if m["type"] == "charge")
-        pagos_sum = sum(m["amount"] for m in movements if m["type"] == "payment")
-
-        campos_faltantes = [k for k, v in financial_summary.items() if v is None]
-
-        st.write("Campos faltantes en resumen:", campos_faltantes)
-        st.write(f"Suma cargos movimientos: {cargos_sum}")
-        st.write(f"Cargos resumen: {(financial_summary.get('regular_charges') or 0) + (financial_summary.get('installment_purchases') or 0)}")
-        st.write(f"Suma pagos movimientos: {pagos_sum}")
-        st.write(f"Pagos resumen: {financial_summary.get('payments_and_credits') or 0}")
-
-        if campos_faltantes or not financial_summary["summary_consistent"]:
-            st.warning("Inconsistencias detectadas. Consultando DeepSeek para completar análisis...")
-            api_key = st.secrets["deepseek"]["api_key"]
-
-            for campo in campos_faltantes:
-                try:
-                    valor = fallback_deepseek_for_field(campo, full_text, api_key)
-                    st.write(f"Campo {campo} extraído con DeepSeek:")
-                    st.write(valor)
-                except Exception as e:
-                    st.error(f"Error consultando DeepSeek para {campo}: {e}")
-        else:
-            st.success("Extracción local completa y consistente.")
-
-        st.subheader("Resumen financiero")
-        st.json(financial_summary)
-
-        st.subheader("Movimientos (primeros 10)")
-        st.table(movements[:10])
-
-        st.subheader("Compras a Meses Sin Intereses")
-        st.table(msi_purchases)
-
-        st.subheader("Metadata del Estado de Cuenta")
-        st.json(metadata)
-
-if __name__ == "__main__":
-    main()
-
-
-def main():
-    uploaded_file = st.file_uploader("Cargar archivo PDF", type=["pdf"])
-
-    if uploaded_file:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            tmp_path = tmp_file.name
-
-        with pdfplumber.open(tmp_path) as pdf:
-            full_text = ""
-            for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    full_text += text + "\n"
 
         if not full_text.strip():
             st.error("No se pudo extraer texto del PDF. ¿Es un PDF escaneado?")
